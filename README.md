@@ -1,14 +1,8 @@
-# Video Management System
-
-**Complete Video Library Management Solution**
+# video-files-manager
 
 A comprehensive desktop application for managing school activity videos with local storage, YouTube integration, advanced tagging, collection management, and professional-grade performance optimizations.
 
-*GitHub Repository Description: A comprehensive desktop application for managing school activity videos with local storage, YouTube integration, advanced tagging, collection management, and professional-grade performance optimizations.*
-
-**Developed by:** Amit Kumar Upadhyay  
-**Version:** 1.0.0  
-**Release Date:** November 16, 2025
+Developed by Amit Kumar Upadhyay | Version 1.0.0 | November 16, 2025
 
 ## 🚀 Key Highlights
 
@@ -285,7 +279,7 @@ Video Management/
 
 1. **Organize by Activities:** Create clear activity names like "Annual Function 2024" rather than just "Annual Function"
 
-2. **Use Both Local & YouTube:** 
+2. **Use Both Local & YouTube:**
    - Upload local files for offline access
    - Add YouTube links for easy sharing
 
