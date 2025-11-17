@@ -1,0 +1,41 @@
+END-USER LICENSE AGREEMENT (EULA) FOR VIDEO MANAGEMENT SYSTEM
+
+This End-User License Agreement ("EULA") is a legal agreement between you and Video Management Inc. for the Video Management System software product(s) identified above.
+
+LICENSE GRANT
+Video Management Inc. grants you a personal, non-transferable, non-exclusive licence to use the Video Management System software on your devices in accordance with the terms of this EULA.
+
+You are permitted to:
+- Install and use the software on any number of computers for personal, business or educational use
+- Make copies of the software for backup purposes
+
+You are NOT permitted to:
+- Sublicense, sell or distribute the software without written permission from Video Management Inc.
+- Reverse engineer, decompile, or disassemble the software
+- Modify or create derivative works based on the software
+- Remove or alter any copyright notices or other proprietary markings
+
+INTELLECTUAL PROPERTY RIGHTS
+The software and all associated intellectual property rights remain the property of Video Management Inc.
+
+WARRANTY DISCLAIMER
+The software is provided "AS IS" without any warranties or conditions, express or implied, including without limitation any implied warranties of merchantability, fitness for a particular purpose, or non-infringement.
+
+LIMITATION OF LIABILITY
+In no event shall Video Management Inc. be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability.
+
+DATA PRIVACY
+The software may collect and store video metadata locally on your system. No personal data is transmitted to external servers without your explicit consent.
+
+TERMINATION
+This license is effective until terminated. Your rights under this license will terminate automatically without notice if you fail to comply with any term(s) of this license.
+
+GOVERNING LAW
+This agreement shall be governed by the laws of India.
+
+CONTACT INFORMATION
+For support or inquiries:
+Email: support@videomanager.com
+Website: https://videomanager.com
+
+Copyright © 2025 Video Management Inc. All rights reserved.
