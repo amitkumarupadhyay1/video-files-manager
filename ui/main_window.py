@@ -8,15 +8,17 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QCompleter)
 from PyQt6.QtCore import QStringListModel
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QPixmap
+from PyQt6.QtGui import QAction, QIcon, QPixmap, QColor
 import sys
 import os
+import math
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import APP_NAME, APP_VERSION, WINDOW_WIDTH, WINDOW_HEIGHT, ORGANIZATION, DEVELOPER
 from database.db_manager import DatabaseManager
 from utils.file_manager import FileManager
+from utils.backup_manager import BackupManager
 
 
 class MainWindow(QMainWindow):
@@ -29,6 +31,12 @@ class MainWindow(QMainWindow):
         self.current_activity_id = None
         self.selected_video_id = None
         self.current_search_criteria = None  # Store advanced search criteria
+
+        # Pagination state
+        self.current_page = 1
+        self.page_size = 50
+        self.total_pages = 1
+        self.total_videos = 0
 
         self.init_ui()
         self.load_filter_options()
@@ -106,6 +114,38 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(splitter)
         
+        # Pagination Controls
+        pagination_layout = QHBoxLayout()
+        pagination_layout.addStretch()
+        
+        self.first_page_btn = QPushButton("<< First")
+        self.first_page_btn.clicked.connect(self.go_to_first_page)
+        self.first_page_btn.setFixedWidth(80)
+        pagination_layout.addWidget(self.first_page_btn)
+        
+        self.prev_page_btn = QPushButton("< Prev")
+        self.prev_page_btn.clicked.connect(self.prev_page)
+        self.prev_page_btn.setFixedWidth(80)
+        pagination_layout.addWidget(self.prev_page_btn)
+        
+        self.page_label = QLabel("Page 1 of 1")
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_label.setFixedWidth(120)
+        pagination_layout.addWidget(self.page_label)
+        
+        self.next_page_btn = QPushButton("Next >")
+        self.next_page_btn.clicked.connect(self.next_page)
+        self.next_page_btn.setFixedWidth(80)
+        pagination_layout.addWidget(self.next_page_btn)
+        
+        self.last_page_btn = QPushButton("Last >>")
+        self.last_page_btn.clicked.connect(self.go_to_last_page)
+        self.last_page_btn.setFixedWidth(80)
+        pagination_layout.addWidget(self.last_page_btn)
+        
+        pagination_layout.addStretch()
+        main_layout.addLayout(pagination_layout)
+        
         # Create status bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -178,6 +218,23 @@ class MainWindow(QMainWindow):
         about_action = QAction("ℹ️ About", self)
         about_action.triggered.connect(self.show_about)
         toolbar.addAction(about_action)
+        
+        toolbar.addSeparator()
+
+        # Backup action
+        backup_action = QAction("💾 Backup", self)
+        backup_action.triggered.connect(self.create_backup)
+        toolbar.addAction(backup_action)
+
+    def create_backup(self):
+        """Create a manual backup of the database"""
+        backup_manager = BackupManager()
+        success, message = backup_manager.create_backup(manual=True)
+        
+        if success:
+            QMessageBox.information(self, "Backup Successful", message)
+        else:
+            QMessageBox.warning(self, "Backup Failed", f"Could not create backup:\n{message}")
     
     def create_left_panel(self):
         """Create left panel with activities list"""
@@ -309,14 +366,77 @@ class MainWindow(QMainWindow):
             videos_count = activity.get('videos_count', 0)
             item_text = f"{activity['name']} ({videos_count})"
             self.activities_list.addItem(item_text)
+            
+            # Handle class color
+            class_color = activity.get('class_color')
+            if class_color:
+                # Create a colored icon
+                pixmap = QPixmap(12, 12)
+                pixmap.fill(QColor(class_color))
+                icon = QIcon(pixmap)
+                self.activities_list.item(self.activities_list.count() - 1).setIcon(icon)
+
             # Store activity ID in item data
             self.activities_list.item(self.activities_list.count() - 1).setData(Qt.ItemDataRole.UserRole, activity['id'])
     
-    def load_videos(self, videos=None):
-        """Load videos into the table"""
-        if videos is None:
-            videos = self.db.get_all_videos()
+    def load_videos(self):
+        """Fetch videos from DB based on current state with pagination"""
+        offset = (self.current_page - 1) * self.page_size
         
+        # Determine mode
+        if self.current_activity_id:
+             videos = self.db.get_videos_by_activity(self.current_activity_id, limit=self.page_size, offset=offset)
+             self.total_videos = self.db.get_total_video_count(self.current_activity_id)
+        elif self.current_search_criteria:
+             # Advanced search
+             c = self.current_search_criteria
+             videos = self.db.search_videos(
+                c.get('search_term', ''), c.get('class_filter', ''), c.get('section_filter', ''),
+                c.get('date_from', ''), c.get('date_to', ''), c.get('format_filter', ''),
+                c.get('tags', ''), c.get('size_min', 0), c.get('size_max', 0),
+                c.get('duration_min', 0), c.get('duration_max', 0), c.get('version_min', 0),
+                c.get('status_filter', ''), c.get('has_local'), c.get('has_youtube'),
+                limit=self.page_size, offset=offset
+             )
+             self.total_videos = self.db.get_search_count(
+                c.get('search_term', ''), c.get('class_filter', ''), c.get('section_filter', ''),
+                c.get('date_from', ''), c.get('date_to', ''), c.get('format_filter', ''),
+                c.get('tags', ''), c.get('size_min', 0), c.get('size_max', 0),
+                c.get('duration_min', 0), c.get('duration_max', 0), c.get('version_min', 0),
+                c.get('status_filter', ''), c.get('has_local'), c.get('has_youtube')
+             )
+        else:
+             # Check simple search/filters
+             search_term = self.search_input.text().strip()
+             class_filter = self.class_filter.currentText()
+             # Map "All" to "" (assuming "All" is empty string data, need to verify)
+             # In load_filter_options, addItem("All", "") so currentData() is ""
+             class_data = self.class_filter.currentData() or ""
+             section_data = self.section_filter.currentData() or ""
+             
+             if search_term or class_data or section_data:
+                 videos = self.db.search_videos(
+                    search_term=search_term,
+                    class_filter=class_data,
+                    section_filter=section_data,
+                    limit=self.page_size,
+                    offset=offset
+                 )
+                 self.total_videos = self.db.get_search_count(
+                    search_term=search_term,
+                    class_filter=class_data,
+                    section_filter=section_data
+                 )
+             else:
+                 videos = self.db.get_all_videos(limit=self.page_size, offset=offset)
+                 self.total_videos = self.db.get_total_video_count()
+
+        self.update_video_table(videos)
+        self.update_pagination_controls()
+        self.status_label.setText(f"Showing {len(videos)} videos (Total: {self.total_videos})")
+
+    def update_video_table(self, videos):
+        """Render videos into the table"""
         self.videos_table.setRowCount(0)
         
         for video in videos:
@@ -358,6 +478,42 @@ class MainWindow(QMainWindow):
             if video.get('has_youtube_link'):
                 availability.append("🌐 YouTube")
             self.videos_table.setItem(row, 6, QTableWidgetItem(" | ".join(availability) if availability else "None"))
+
+    def update_pagination_controls(self):
+        """Update state of pagination buttons"""
+        if self.total_videos > 0:
+            self.total_pages = math.ceil(self.total_videos / self.page_size)
+        else:
+            self.total_pages = 1
+            
+        self.page_label.setText(f"Page {self.current_page} of {self.total_pages}")
+        
+        self.first_page_btn.setEnabled(self.current_page > 1)
+        self.prev_page_btn.setEnabled(self.current_page > 1)
+        self.next_page_btn.setEnabled(self.current_page < self.total_pages)
+        self.last_page_btn.setEnabled(self.current_page < self.total_pages)
+
+    def prev_page(self):
+        """Go to previous page"""
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_videos()
+
+    def next_page(self):
+        """Go to next page"""
+        if self.current_page < self.total_pages:
+            self.current_page += 1
+            self.load_videos()
+            
+    def go_to_first_page(self):
+        """Go to first page"""
+        self.current_page = 1
+        self.load_videos()
+        
+    def go_to_last_page(self):
+        """Go to last page"""
+        self.current_page = self.total_pages
+        self.load_videos()
     
     def activity_selected(self, item):
         """Handle activity selection"""
@@ -366,13 +522,14 @@ class MainWindow(QMainWindow):
         
         if activity:
             self.videos_title.setText(f"Videos - {activity['name']}")
-            videos = self.db.get_videos_by_activity(self.current_activity_id)
-            self.load_videos(videos)
+            self.current_page = 1
+            self.load_videos()
     
     def show_all_videos(self):
         """Show all videos"""
         self.current_activity_id = None
         self.videos_title.setText("All Videos")
+        self.current_page = 1
         self.load_videos()
         self.activities_list.clearSelection()
     
@@ -802,24 +959,9 @@ class MainWindow(QMainWindow):
         if not self.current_search_criteria:
             return
 
-        # Call the advanced search method with tags support
-        videos = self.db.search_videos(
-            self.current_search_criteria.get('search_term', ''),
-            self.current_search_criteria.get('class_filter', ''),
-            self.current_search_criteria.get('section_filter', ''),
-            self.current_search_criteria.get('date_from', ''),
-            self.current_search_criteria.get('date_to', ''),
-            self.current_search_criteria.get('format_filter', ''),
-            self.current_search_criteria.get('tags', ''),
-            self.current_search_criteria.get('size_min', 0),
-            self.current_search_criteria.get('size_max', 0),
-            self.current_search_criteria.get('duration_min', 0),
-            self.current_search_criteria.get('duration_max', 0),
-            self.current_search_criteria.get('version_min', 0),
-            self.current_search_criteria.get('has_local'),
-            self.current_search_criteria.get('has_youtube')
-        )
-        self.load_videos(videos)
+        # Call the advanced search method with tags support - UPDATE: Just fetch using load_videos which uses criteria
+        self.current_page = 1
+        self.load_videos()
 
         # Create descriptive title
         title_parts = []
@@ -860,9 +1002,9 @@ class MainWindow(QMainWindow):
             self.apply_advanced_search()
         else:
             # Simple search
-            videos = self.db.search_videos(text.strip())
+            self.current_page = 1
             self.videos_title.setText(f"Search Results - '{text.strip()}'")
-            self.load_videos(videos)
+            self.load_videos()
 
     def load_filter_options(self):
         """Load class and section filter options"""
@@ -888,8 +1030,8 @@ class MainWindow(QMainWindow):
         section_filter = self.section_filter.currentData() or ""
 
         # Load filtered videos
-        videos = self.db.get_videos_filtered(class_filter, section_filter)
-        self.load_videos(videos)
+        self.current_page = 1
+        self.load_videos()
 
         # Load filtered activities
         activities = self.db.get_activities_filtered(class_filter, section_filter)
@@ -937,11 +1079,15 @@ class MainWindow(QMainWindow):
         """Refresh all data"""
         self.load_filter_options()
         self.load_activities()
-        if self.current_activity_id:
-            videos = self.db.get_videos_by_activity(self.current_activity_id)
-            self.load_videos(videos)
-        else:
-            self.load_videos()
+        # Just reload videos, current state (activity/search) is preserved or we can reset
+        # Let's reset page to 1 but keep context if possible? 
+        # Actually refresh usually means "reload data", but existing logic tried to keep context.
+        # But load_videos() reads current context! So just calling it is enough.
+        # But we should probably stay on current page? Or reset?
+        # User expectation on "Refresh": see new data. 
+        # If I stay on page 5 and new data is on page 1, might be confusing.
+        # But commonly refresh keeps view. Let's keep page.
+        self.load_videos()
         self.update_statistics()
         self.status_label.setText("Refreshed")
 

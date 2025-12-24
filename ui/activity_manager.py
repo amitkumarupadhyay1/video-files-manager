@@ -4,6 +4,7 @@ Activity Manager Dialog
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                              QLabel, QLineEdit, QListWidget, QMessageBox, QTextEdit, QComboBox)
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QIcon, QPixmap, QColor
 
 
 class ActivityManagerDialog(QDialog):
@@ -149,9 +150,20 @@ class ActivityManagerDialog(QDialog):
         activities = self.db.get_all_activities()
         
         for activity in activities:
-            videos_count = len(self.db.get_videos_by_activity(activity['id']))
+            # Use pre-calculated count from DB query if available, otherwise fallback
+            videos_count = activity.get('videos_count', 0)
             item_text = f"{activity['name']} ({videos_count} videos)"
             self.activities_list.addItem(item_text)
+            
+            # Handle class color
+            class_color = activity.get('class_color')
+            if class_color:
+                # Create a colored icon
+                pixmap = QPixmap(12, 12)
+                pixmap.fill(QColor(class_color))
+                icon = QIcon(pixmap)
+                self.activities_list.item(self.activities_list.count() - 1).setIcon(icon)
+
             self.activities_list.item(self.activities_list.count() - 1).setData(
                 Qt.ItemDataRole.UserRole, activity['id']
             )
@@ -178,8 +190,8 @@ class ActivityManagerDialog(QDialog):
             return
 
         description = self.description_input.toPlainText().strip()
-        class_name = self.class_input.text().strip()
-        section = self.section_input.text().strip()
+        class_name = self.class_input.currentText().strip()
+        section = self.section_input.currentText().strip()
 
         activity_id = self.db.add_activity(name, description, class_name, section)
 
@@ -202,8 +214,8 @@ class ActivityManagerDialog(QDialog):
             return
 
         description = self.description_input.toPlainText().strip()
-        class_name = self.class_input.text().strip()
-        section = self.section_input.text().strip()
+        class_name = self.class_input.currentText().strip()
+        section = self.section_input.currentText().strip()
 
         if self.db.update_activity(self.selected_activity_id, name, description, class_name, section):
             QMessageBox.information(self, "Success", "Activity updated successfully")
@@ -245,8 +257,8 @@ class ActivityManagerDialog(QDialog):
     def clear_form(self):
         """Clear form inputs"""
         self.name_input.clear()
-        self.class_input.clear()
-        self.section_input.clear()
+        self.class_input.setCurrentIndex(0)
+        self.section_input.setCurrentIndex(0)
         self.description_input.clear()
         self.selected_activity_id = None
         self.update_btn.setEnabled(False)

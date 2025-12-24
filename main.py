@@ -38,6 +38,19 @@ def main():
     app.setStyle('Fusion')
     
     # Create and show main window
+    
+    # Auto-backup
+    try:
+        from utils.backup_manager import BackupManager
+        bm = BackupManager()
+        success, msg = bm.create_backup(manual=False)
+        if success:
+            logging.info(f"Auto-backup successful: {msg}")
+        else:
+            logging.warning(f"Auto-backup failed: {msg}")
+    except Exception as e:
+        logging.error(f"Failed to run auto-backup: {str(e)}")
+
     window = MainWindow()
     window.show()
     

@@ -260,11 +260,16 @@ class DatabaseManager:
         """Get all activities"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        # Return activities with video counts to avoid repeated queries in UI
+        # Return activities with video counts and colors to avoid repeated queries in UI
         cursor.execute('''
-            SELECT a.*, COUNT(v.id) as videos_count
+            SELECT a.*, 
+                   COUNT(v.id) as videos_count,
+                   c.color as class_color,
+                   s.color as section_color
             FROM activities a
             LEFT JOIN videos v ON v.activity_id = a.id
+            LEFT JOIN classes c ON a.class = c.name
+            LEFT JOIN sections s ON a.section = s.name
             GROUP BY a.id
             ORDER BY a.name
         ''')
@@ -353,31 +358,57 @@ class DatabaseManager:
         conn.close()
         return video_id
     
-    def get_all_videos(self) -> List[Dict]:
-        """Get all videos with activity information"""
+    def get_all_videos(self, limit: int = 0, offset: int = 0) -> List[Dict]:
+        """Get all videos with activity information, optionally paginated"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        
+        query = '''
             SELECT v.*, a.name as activity_name, a.class as activity_class, a.section as activity_section
             FROM videos v
             LEFT JOIN activities a ON v.activity_id = a.id
             ORDER BY v.upload_date DESC
-        ''')
+        '''
+        
+        if limit > 0:
+            query += f" LIMIT {limit} OFFSET {offset}"
+            
+        cursor.execute(query)
         videos = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return videos
-    
-    def get_videos_by_activity(self, activity_id: int) -> List[Dict]:
-        """Get all videos for a specific activity"""
+
+    def get_total_video_count(self, activity_id: Optional[int] = None) -> int:
+        """Get total number of videos, optionally filtered by activity"""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        
+        if activity_id:
+            cursor.execute("SELECT COUNT(*) as count FROM videos WHERE activity_id = ?", (activity_id,))
+        else:
+            cursor.execute("SELECT COUNT(*) as count FROM videos")
+            
+        count = cursor.fetchone()['count']
+        conn.close()
+        return count
+    
+    def get_videos_by_activity(self, activity_id: int, limit: int = 0, offset: int = 0) -> List[Dict]:
+        """Get all videos for a specific activity, optionally paginated"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        query = '''
             SELECT v.*, a.name as activity_name 
             FROM videos v
             LEFT JOIN activities a ON v.activity_id = a.id
             WHERE v.activity_id = ?
             ORDER BY v.version_number DESC, v.upload_date DESC
-        ''', (activity_id,))
+        '''
+        
+        if limit > 0:
+            query += f" LIMIT {limit} OFFSET {offset}"
+            
+        cursor.execute(query, (activity_id,))
         videos = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return videos
@@ -449,10 +480,11 @@ class DatabaseManager:
         return success
     
     def search_videos(self, search_term: str, class_filter: str = "", section_filter: str = "",
-                     date_from: str = "", date_to: str = "", format_filter: str = "",
-                     tags: str = "", size_min: int = 0, size_max: int = 0, duration_min: int = 0,
-                     duration_max: int = 0, version_min: int = 0, status_filter: str = "",
-                     has_local: bool = None, has_youtube: bool = None) -> List[Dict]:
+                      date_from: str = "", date_to: str = "", format_filter: str = "",
+                      tags: str = "", size_min: int = 0, size_max: int = 0, duration_min: int = 0,
+                      duration_max: int = 0, version_min: int = 0, status_filter: str = "",
+                      has_local: bool = None, has_youtube: bool = None,
+                      limit: int = 0, offset: int = 0) -> List[Dict]:
         """Advanced search with multiple filter criteria"""
         conn = self.get_connection()
         cursor = conn.cursor()
@@ -561,11 +593,255 @@ class DatabaseManager:
 
         query += " ORDER BY v.upload_date DESC"
 
+        if limit > 0:
+            # IMPORTANT: parameters must be passed to execute, not f-string, but limit/offset are safe integers
+            # However, since we are building query string dynamically with params list, we handle it carefully.
+            # Append to query string, but we don't need to add to params list for simple integer literals if passed directly, 
+            # OR we can add placeholders. Let's use direct formatting for integers which is safe here.
+            query += f" LIMIT {limit} OFFSET {offset}"
+
         cursor.execute(query, params)
         videos = [dict(row) for row in cursor.fetchall()]
         conn.close()
         return videos
 
+    def get_search_count(self, search_term: str, class_filter: str = "", section_filter: str = "",
+                      date_from: str = "", date_to: str = "", format_filter: str = "",
+                      tags: str = "", size_min: int = 0, size_max: int = 0, duration_min: int = 0,
+                      duration_max: int = 0, version_min: int = 0, status_filter: str = "",
+                      has_local: bool = None, has_youtube: bool = None) -> int:
+        """Get total count of videos matching search criteria (without pagination limits)"""
+        # This duplicates the logic of search_videos but returns COUNT(*)
+        # Ideally, we would refactor to share the query building logic, but for safety in this modification
+        # we will copy the query building logic.
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Parse tags
+        tag_list = []
+        if tags and tags.strip():
+            tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+        # Determine if we need to join with tags
+        needs_tag_join = bool(tag_list)
+
+        if needs_tag_join:
+            query = '''
+                SELECT COUNT(DISTINCT v.id) as count
+                FROM videos v
+                LEFT JOIN activities a ON v.activity_id = a.id
+                LEFT JOIN video_tags vt ON vt.video_id = v.id
+                LEFT JOIN tags t ON vt.tag_id = t.id
+                WHERE 1=1
+            '''
+        else:
+            query = '''
+                SELECT COUNT(*) as count
+                FROM videos v
+                LEFT JOIN activities a ON v.activity_id = a.id
+                WHERE 1=1
+            '''
+
+        params = []
+
+        # Text search
+        if search_term and search_term.strip():
+            search_pattern = f"%{search_term.strip()}%"
+            query += ''' AND (
+                v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR
+                a.name LIKE ? OR v.file_name LIKE ?
+            )'''
+            params.extend([search_pattern, search_pattern, search_pattern, search_pattern, search_pattern])
+
+        # Tag filter
+        if tag_list:
+            placeholders = ','.join('?' * len(tag_list))
+            query += f" AND t.name IN ({placeholders})"
+            params.extend(tag_list)
+
+        # Class filter
+        if class_filter and class_filter != "All":
+            query += " AND a.class = ?"
+            params.append(class_filter)
+
+        # Section filter
+        if section_filter and section_filter != "All":
+            query += " AND a.section = ?"
+            params.append(section_filter)
+
+        # Date range filters
+        if date_from:
+            query += " AND v.upload_date >= ?"
+            params.append(date_from + " 00:00:00")
+        if date_to:
+            query += " AND v.upload_date <= ?"
+            params.append(date_to + " 23:59:59")
+
+        # Format filter
+        if format_filter and format_filter != "All":
+            query += " AND v.format = ?"
+            params.append(format_filter)
+
+        # Size filters
+        if size_min > 0:
+            query += " AND v.file_size >= ?"
+            params.append(size_min)
+        if size_max > 0:
+            query += " AND v.file_size <= ?"
+            params.append(size_max)
+
+        # Duration filters
+        if duration_min > 0:
+            query += " AND v.duration >= ?"
+            params.append(duration_min)
+        if duration_max > 0:
+            query += " AND v.duration <= ?"
+            params.append(duration_max)
+
+        # Version filter
+        if version_min > 0:
+            query += " AND v.version_number >= ?"
+            params.append(version_min)
+
+        # Status filter
+        if status_filter and status_filter != "All":
+            query += " AND v.version_status = ?"
+            params.append(status_filter)
+
+        # Availability filters
+        if has_local is True:
+            query += " AND v.has_local_copy = 1"
+        elif has_local is False:
+            query += " AND v.has_local_copy = 0"
+
+        if has_youtube is True:
+            query += " AND v.has_youtube_link = 1"
+        elif has_youtube is False:
+            query += " AND v.has_youtube_link = 0"
+
+        cursor.execute(query, params)
+        count = cursor.fetchone()['count']
+        conn.close()
+        return count
+
+    def get_search_count(self, search_term: str, class_filter: str = "", section_filter: str = "",
+                      date_from: str = "", date_to: str = "", format_filter: str = "",
+                      tags: str = "", size_min: int = 0, size_max: int = 0, duration_min: int = 0,
+                      duration_max: int = 0, version_min: int = 0, status_filter: str = "",
+                      has_local: bool = None, has_youtube: bool = None) -> int:
+        """Get total count of videos matching search criteria (without pagination limits)"""
+        
+        conn = self.get_connection()
+        cursor = conn.cursor()
+
+        # Parse tags
+        tag_list = []
+        if tags and tags.strip():
+            tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+
+        # Determine if we need to join with tags
+        needs_tag_join = bool(tag_list)
+
+        if needs_tag_join:
+            query = '''
+                SELECT COUNT(DISTINCT v.id) as count
+                FROM videos v
+                LEFT JOIN activities a ON v.activity_id = a.id
+                LEFT JOIN video_tags vt ON vt.video_id = v.id
+                LEFT JOIN tags t ON vt.tag_id = t.id
+                WHERE 1=1
+            '''
+        else:
+            query = '''
+                SELECT COUNT(*) as count
+                FROM videos v
+                LEFT JOIN activities a ON v.activity_id = a.id
+                WHERE 1=1
+            '''
+
+        params = []
+
+        # Text search
+        if search_term and search_term.strip():
+            search_pattern = f"%{search_term.strip()}%"
+            query += ''' AND (
+                v.title LIKE ? OR v.description LIKE ? OR v.tags LIKE ? OR
+                a.name LIKE ? OR v.file_name LIKE ?
+            )'''
+            params.extend([search_pattern, search_pattern, search_pattern, search_pattern, search_pattern])
+
+        # Tag filter
+        if tag_list:
+            placeholders = ','.join('?' * len(tag_list))
+            query += f" AND t.name IN ({placeholders})"
+            params.extend(tag_list)
+
+        # Class filter
+        if class_filter and class_filter != "All":
+            query += " AND a.class = ?"
+            params.append(class_filter)
+
+        # Section filter
+        if section_filter and section_filter != "All":
+            query += " AND a.section = ?"
+            params.append(section_filter)
+
+        # Date range filters
+        if date_from:
+            query += " AND v.upload_date >= ?"
+            params.append(date_from + " 00:00:00")
+        if date_to:
+            query += " AND v.upload_date <= ?"
+            params.append(date_to + " 23:59:59")
+
+        # Format filter
+        if format_filter and format_filter != "All":
+            query += " AND v.format = ?"
+            params.append(format_filter)
+
+        # Size filters
+        if size_min > 0:
+            query += " AND v.file_size >= ?"
+            params.append(size_min)
+        if size_max > 0:
+            query += " AND v.file_size <= ?"
+            params.append(size_max)
+
+        # Duration filters
+        if duration_min > 0:
+            query += " AND v.duration >= ?"
+            params.append(duration_min)
+        if duration_max > 0:
+            query += " AND v.duration <= ?"
+            params.append(duration_max)
+
+        # Version filter
+        if version_min > 0:
+            query += " AND v.version_number >= ?"
+            params.append(version_min)
+
+        # Status filter
+        if status_filter and status_filter != "All":
+            query += " AND v.version_status = ?"
+            params.append(status_filter)
+
+        # Availability filters
+        if has_local is True:
+            query += " AND v.has_local_copy = 1"
+        elif has_local is False:
+            query += " AND v.has_local_copy = 0"
+
+        if has_youtube is True:
+            query += " AND v.has_youtube_link = 1"
+        elif has_youtube is False:
+            query += " AND v.has_youtube_link = 0"
+
+        cursor.execute(query, params)
+        count = cursor.fetchone()['count']
+        conn.close()
+        return count
+            
     def get_unique_formats(self) -> List[str]:
         """Get all unique video formats in the database"""
         conn = self.get_connection()
