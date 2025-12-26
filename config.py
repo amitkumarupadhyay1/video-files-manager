@@ -17,7 +17,7 @@ DATABASE_PATH = os.path.join(STORAGE_DIR, 'video_manager.db')
 
 # Application settings
 APP_NAME = "Video Organizer"
-APP_VERSION = "1.0.0"
+APP_VERSION = "2.0.0"
 ORGANIZATION = "Jingle Bell Nursery School Society"
 DEVELOPER = "Amit Kumar Upadhyay"
 WINDOW_WIDTH = 1400

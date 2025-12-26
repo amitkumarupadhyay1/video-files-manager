@@ -214,17 +214,17 @@ class MainWindow(QMainWindow):
 
         toolbar.addSeparator()
 
-        # About action
-        about_action = QAction("ℹ️ About", self)
-        about_action.triggered.connect(self.show_about)
-        toolbar.addAction(about_action)
-        
-        toolbar.addSeparator()
-
         # Backup action
         backup_action = QAction("💾 Backup", self)
         backup_action.triggered.connect(self.create_backup)
         toolbar.addAction(backup_action)
+        
+        toolbar.addSeparator()
+
+        # About action
+        about_action = QAction("ℹ️ About", self)
+        about_action.triggered.connect(self.show_about)
+        toolbar.addAction(about_action)
 
     def create_backup(self):
         """Create a manual backup of the database"""
